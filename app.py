@@ -1,16 +1,14 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 import json
-from time import sleep
 import os
+from time import sleep
+from io import BytesIO
 from tqdm import tqdm
 
-# 👉 USER CONFIG
-DISTRICT = "Guntur"
-
-# Load geocode cache
+# 🗂️ Load geocode cache
 def load_cache(filename="geo_cache.json"):
     if os.path.exists(filename):
         with open(filename, "r") as f:
@@ -21,7 +19,7 @@ def save_cache(cache, filename="geo_cache.json"):
     with open(filename, "w") as f:
         json.dump(cache, f)
 
-# Geocode using Nominatim (with cache)
+# 📍 Geocode using Nominatim (with cache)
 def geocode_address_nominatim(geolocator, address, cache):
     if address in cache:
         return cache[address]
@@ -35,16 +33,15 @@ def geocode_address_nominatim(geolocator, address, cache):
         print(f"Error for '{address}': {e}")
     return None
 
-# Load the data from the XLSX file
-def load_xlsx_data(uploaded_file):
-    df = pd.read_excel(uploaded_file)
+# 🧾 Load the data from the XLSX file
+def load_xlsx_data(xlsx_path):
+    df = pd.read_excel(xlsx_path)
     return df
 
-# Main function to process the data
+# 🚀 Main function to process the data
 def process(xlsx_file, user_coords, category_priority):
     df = load_xlsx_data(xlsx_file)
     
-    # Check if necessary columns exist
     if not all(col in df.columns for col in ["School", "Mandal", "Category"]):
         st.error("The Excel file must contain columns: 'School', 'Mandal', 'Category'")
         return None
@@ -52,7 +49,6 @@ def process(xlsx_file, user_coords, category_priority):
     geolocator = Nominatim(user_agent="teacher-transfer-tool")
     cache = load_cache()
 
-    # Geocode user location
     st.write("📍 Geocoding user location...")
     if not user_coords:
         st.error("❌ Could not geocode user location")
@@ -107,40 +103,56 @@ def process(xlsx_file, user_coords, category_priority):
     # Final result without duplicates
     final_df = pd.concat([df_valid_sorted, df_missing_sorted], ignore_index=True)
 
-    out_file = "sorted_school_distances_with_missing.xlsx"
-    final_df.to_excel(out_file, index=False)
-    st.write(f"\n✅ Done. Output saved to: {out_file}")
+    # Save the final output to a BytesIO buffer
+    output = BytesIO()
+    final_df.to_excel(output, index=False)
+    output.seek(0)  # Seek to the beginning of the BytesIO object
     
-    return out_file
+    return output
 
 # Streamlit UI
 st.title("Teacher Transfer Tool")
 
-uploaded_file = st.file_uploader("Upload your school list XLSX", type=["xlsx"])
-user_location = st.text_input("Enter your location (e.g., Bapatla, Andhra Pradesh)")
-category_priority = st.text_input("Enter category priority (e.g., 4 3 2 1)")
-
-# If the user input is empty, use default values
-if not category_priority:
-    category_priority = [4, 3, 2, 1]
-else:
-    category_priority = list(map(int, category_priority.split()))
+uploaded_file = st.file_uploader("Upload your school list (XLSX)", type=["xlsx"])
 
 if uploaded_file:
+    # Get user location input
+    user_location = st.text_input("Enter your location (e.g., Bapatla, Andhra Pradesh) or press Enter to enter coordinates:")
+    
     if user_location:
+        # Geolocate user input address
         geolocator = Nominatim(user_agent="teacher-transfer-tool")
         cache = load_cache()
         user_coords = geocode_address_nominatim(geolocator, user_location + ", Andhra Pradesh", cache)
         
         if user_coords:
+            category_priority = list(map(int, st.text_input("Enter category priority (e.g., 4 3 2 1)").split()))
+            if not category_priority:
+                category_priority = [4, 3, 2, 1]
             result_file = process(uploaded_file, user_coords, category_priority)
-            st.download_button("Download Sorted List", result_file)
+            
+            if result_file:
+                st.download_button(
+                    "Download Sorted List", 
+                    result_file, 
+                    "sorted_school_distances_with_missing.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
         else:
             st.error("❌ Could not geocode user location")
     else:
+        # Get latitude and longitude inputs
         lat = st.number_input("Enter latitude (e.g., 15.902):", format="%.6f")
         lon = st.number_input("Enter longitude (e.g., 80.467):", format="%.6f")
         
         user_coords = (lat, lon)
+        category_priority = [4, 3, 2, 1]
         result_file = process(uploaded_file, user_coords, category_priority)
-        st.download_button("Download Sorted List", result_file)
+        
+        if result_file:
+            st.download_button(
+                "Download Sorted List", 
+                result_file, 
+                "sorted_school_distances_with_missing.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
