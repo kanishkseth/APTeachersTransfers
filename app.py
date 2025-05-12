@@ -5,33 +5,8 @@ from geopy.distance import geodesic
 import json
 import os
 from time import sleep
+from io import BytesIO
 from tqdm import tqdm
-import tempfile
-
-# 👉 USER CONFIG
-st.title("Teacher Transfer Tool")
-st.write("Upload the school data (XLSX) and provide location details.")
-
-# Upload school data (XLSX)
-uploaded_file = st.file_uploader("Upload your school list XLSX", type=["xlsx"])
-
-# Input for user location
-USER_LOCATION = st.text_input("Enter your location (e.g., Bapatla, Andhra Pradesh) or press Enter to enter coordinates:")
-
-# Input for category priority
-CATEGORY_PRIORITY = st.text_input("Enter category priority (e.g., 4 3 2 1):")
-CATEGORY_PRIORITY = list(map(int, CATEGORY_PRIORITY.split())) if CATEGORY_PRIORITY else [4, 3, 2, 1]
-
-USE_COORDS_DIRECTLY = False
-
-# Input for latitude and longitude if coordinates are provided
-if not USER_LOCATION:
-    lat = st.number_input("Enter your latitude (e.g., 15.902):", value=15.902)
-    lon = st.number_input("Enter your longitude (e.g., 80.467):", value=80.467)
-    USER_COORDS = (lat, lon)
-    USE_COORDS_DIRECTLY = True
-
-DISTRICT = "Guntur"
 
 # 🗂️ Load geocode cache
 def load_cache(filename="geo_cache.json"):
@@ -59,31 +34,25 @@ def geocode_address_nominatim(geolocator, address, cache):
     return None
 
 # 🧾 Load the data from the XLSX file
-def load_xlsx_data(xlsx_file):
-    df = pd.read_excel(xlsx_file)
+def load_xlsx_data(xlsx_path):
+    df = pd.read_excel(xlsx_path)
     return df
 
 # 🚀 Main function to process the data
-def process(xlsx_file):
+def process(xlsx_file, user_coords, category_priority):
     df = load_xlsx_data(xlsx_file)
     
-    # Check if the necessary columns exist
-    st.write("Available columns in the file:")
-    st.write(df.columns)
-    
     if not all(col in df.columns for col in ["School", "Mandal", "Category"]):
-        raise ValueError("The Excel file must contain columns: 'School', 'Mandal', 'Category'")
+        st.error("The Excel file must contain columns: 'School', 'Mandal', 'Category'")
+        return None
     
     geolocator = Nominatim(user_agent="teacher-transfer-tool")
     cache = load_cache()
 
     st.write("📍 Geocoding user location...")
-    if USE_COORDS_DIRECTLY:
-        user_coords = USER_COORDS
-    else:
-        user_coords = geocode_address_nominatim(geolocator, USER_LOCATION + ", Andhra Pradesh", cache)
     if not user_coords:
-        raise Exception("❌ Could not geocode user location")
+        st.error("❌ Could not geocode user location")
+        return None
 
     st.write(f"🧭 Calculating distance for {len(df)} schools...")
     distances = []
@@ -103,17 +72,17 @@ def process(xlsx_file):
     save_cache(cache)
     df['Distance_km'] = distances
 
-    # Separate successful and missing geocodes
+    # Separate valid and missing geocoded rows
     df_valid = df.dropna(subset=["Distance_km"]).copy()
     df_missing = df.loc[missing_rows].copy()
 
     # Process valid geocoded rows
-    df_valid['PriorityIndex'] = df_valid['Category'].apply(lambda c: CATEGORY_PRIORITY.index(c))
+    df_valid['PriorityIndex'] = df_valid['Category'].apply(lambda c: category_priority.index(c))
     df_valid_sorted = df_valid.sort_values(by=["PriorityIndex", "Distance_km"])
     df_valid_sorted = df_valid_sorted[["School", "Mandal", "Category", "Distance_km"]]
 
     # Process missing geocoded rows using only mandal
-    st.write(f"🧭 Calculating distance for missing schools by Mandal...")
+    st.write("🧭 Calculating distance for missing schools by Mandal...")
     missing_distances = []
 
     for _, row in tqdm(df_missing.iterrows(), total=len(df_missing)):
@@ -127,30 +96,109 @@ def process(xlsx_file):
         missing_distances.append(dist)
 
     df_missing['Distance_km'] = missing_distances
-    df_missing['PriorityIndex'] = df_missing['Category'].apply(lambda c: CATEGORY_PRIORITY.index(c))
+    df_missing['PriorityIndex'] = df_missing['Category'].apply(lambda c: category_priority.index(c))
     df_missing_sorted = df_missing.sort_values(by=["PriorityIndex", "Distance_km"])
     df_missing_sorted = df_missing_sorted[["School", "Mandal", "Category", "Distance_km"]]
 
     # Final result without duplicates
     final_df = pd.concat([df_valid_sorted, df_missing_sorted], ignore_index=True)
 
-    # Save output to temporary file
-    output_xlsx = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    final_df.to_excel(output_xlsx.name, index=False)
+    # Save the final output to a BytesIO buffer
+    output = BytesIO()
+    final_df.to_excel(output, index=False)
+    output.seek(0)  # Seek to the beginning of the BytesIO object
+    
+    return output
 
-    return output_xlsx.name
+# Streamlit UI
+# Adding custom CSS for UI enhancement
+st.markdown("""
+    <style>
+        .main {
+            background-color: #F3E6FF;
+            color: #5A2A83;
+            font-family: 'Arial', sans-serif;
+        }
+        .stButton>button {
+            background-color: #9B77E4;
+            color: white;
+            border-radius: 12px;
+            padding: 12px 25px;
+            font-size: 16px;
+        }
+        h1 {
+            color: #6A2D9B;
+            font-size: 40px;
+            text-align: center;
+            font-weight: 600;
+        }
+        .stTextInput>label {
+            color: #6A2D9B;
+        }
+        .stFileUploader>label {
+            color: #6A2D9B;
+        }
+        .stDownloadButton>button {
+            background-color: #9B77E4;
+            color: white;
+            border-radius: 12px;
+            padding: 12px 25px;
+            font-size: 16px;
+        }
+        .header-image {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            object-fit: cover;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-if uploaded_file is not None:
-    try:
-        output_file = process(uploaded_file)
+# Adding an image at the top for the background
+st.image('https://via.placeholder.com/800x400.png?text=Teacher+Transfer+System', caption='School System', use_column_width=True)
 
-        # Provide download link
-        with open(output_file, "rb") as f:
+st.title("Teacher Transfer Tool")
+
+uploaded_file = st.file_uploader("Upload your school list (XLSX)", type=["xlsx"])
+
+if uploaded_file:
+    # Get user location input
+    user_location = st.text_input("Enter your location (e.g., Bapatla, Andhra Pradesh) or press Enter to enter coordinates:")
+    
+    if user_location:
+        # Geolocate user input address
+        geolocator = Nominatim(user_agent="teacher-transfer-tool")
+        cache = load_cache()
+        user_coords = geocode_address_nominatim(geolocator, user_location + ", Andhra Pradesh", cache)
+        
+        if user_coords:
+            category_priority = list(map(int, st.text_input("Enter category priority (e.g., 4 3 2 1)").split()))
+            if not category_priority:
+                category_priority = [4, 3, 2, 1]
+            result_file = process(uploaded_file, user_coords, category_priority)
+            
+            if result_file:
+                st.download_button(
+                    "Download Sorted List", 
+                    result_file, 
+                    "sorted_school_distances_with_missing.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        else:
+            st.error("❌ Could not geocode user location")
+    else:
+        # Get latitude and longitude inputs
+        lat = st.number_input("Enter latitude (e.g., 15.902):", format="%.6f")
+        lon = st.number_input("Enter longitude (e.g., 80.467):", format="%.6f")
+        
+        user_coords = (lat, lon)
+        category_priority = [4, 3, 2, 1]
+        result_file = process(uploaded_file, user_coords, category_priority)
+        
+        if result_file:
             st.download_button(
-                label="Download the processed data as XLSX",
-                data=f,
-                file_name="sorted_school_distances_with_missing.xlsx",
+                "Download Sorted List", 
+                result_file, 
+                "sorted_school_distances_with_missing.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-    except Exception as e:
-        st.error(f"Error: {e}")
