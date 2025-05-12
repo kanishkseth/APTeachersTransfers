@@ -111,52 +111,6 @@ def process(xlsx_file, user_coords, category_priority):
     return output
 
 # Streamlit UI
-# Adding custom CSS for UI enhancement
-st.markdown("""
-    <style>
-        .main {
-            background-color: #F3E6FF;
-            color: #5A2A83;
-            font-family: 'Arial', sans-serif;
-        }
-        .stButton>button {
-            background-color: #9B77E4;
-            color: white;
-            border-radius: 12px;
-            padding: 12px 25px;
-            font-size: 16px;
-        }
-        h1 {
-            color: #6A2D9B;
-            font-size: 40px;
-            text-align: center;
-            font-weight: 600;
-        }
-        .stTextInput>label {
-            color: #6A2D9B;
-        }
-        .stFileUploader>label {
-            color: #6A2D9B;
-        }
-        .stDownloadButton>button {
-            background-color: #9B77E4;
-            color: white;
-            border-radius: 12px;
-            padding: 12px 25px;
-            font-size: 16px;
-        }
-        .header-image {
-            width: 100%;
-            height: auto;
-            border-radius: 10px;
-            object-fit: cover;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-# Adding an image at the top for the background
-st.image('https://via.placeholder.com/800x400.png?text=Teacher+Transfer+System', caption='School System', use_column_width=True)
-
 st.title("Teacher Transfer Tool")
 
 uploaded_file = st.file_uploader("Upload your school list (XLSX)", type=["xlsx"])
